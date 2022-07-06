@@ -1,38 +1,3 @@
-/*
-use gst::prelude::GstBinExt;
-use gst::prelude::ElementExt;
-
-fn pipeline_create(uri: &str) -> Result<gst::Pipeline, glib::error::Error> {
-    let pipeline = gst::Pipeline::new(None);
-    
-    let bin = match gst::parse_bin_from_description(&format!("rtspsrc location={uri} ! decodebin ! appsink"), false) {
-        Ok(bin) => bin,
-        Err(error) => {
-            return Err(error);
-        }
-    };
-    
-    pipeline.add(&bin);
-
-    Ok(pipeline)
-}
-
-fn main() {
-    gst::init();
-   
-    let pipeline = pipeline_create("rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mp4").unwrap();
-
-    
-    pipeline.set_state(gst::State::Playing).unwrap(); 
-    loop {
-
-    }
-    
-
-}
-
-*/
-
 // This example demonstrates the use of the decodebin element
 // The decodebin element tries to automatically detect the incoming
 // format and to autoplug the appropriate demuxers / decoders to handle it.
@@ -64,12 +29,8 @@ fn main() {
 // Especially Windows APIs tend to be quite picky about samplerate and sample-format.
 // The same applies to videostreams.
 
-use gst::Element;
-use gst::Pipeline;
 use gst::element_error;
 use gst::element_warning;
-use gst::ffi::GstPad;
-use gst::ffi::gst_pad_link;
 use gst::prelude::*;
 
 use std::env;
@@ -97,7 +58,7 @@ struct ErrorMessage {
 #[boxed_type(name = "ErrorValue")]
 struct ErrorValue(Arc<Mutex<Option<Error>>>);
 
-fn example_main() -> Result<Pipeline, Error> {
+fn example_main() -> Result<(), Error> {
     gst::init()?;
 
     let args: Vec<_> = env::args().collect();
@@ -109,55 +70,28 @@ fn example_main() -> Result<Pipeline, Error> {
     };
 
     let pipeline = gst::Pipeline::new(None);
-    
-    // let bin = gst::parse_bin_from_description(&format!("rtspsrc location={uri} ! decodebin name=decodebin"), false)?;
-    let decodebin = gst::parse_launch(&format!("rtspsrc location={uri} latency=0 ! decodebin name=decoder"))?;
+    let src = gst::ElementFactory::make("rtspsrc", None).map_err(|_| MissingElement("rtspsrc"))?;
 
-    pipeline.add(&decodebin)?;
+    let decodebin =
+        gst::ElementFactory::make("decodebin", None).map_err(|_| MissingElement("decodebin"))?;
 
-    // pipeline.add(&bin)?;
+    // Tell the filesrc what file to load
+    src.set_property("location", uri);
 
-    // // let src_pad = gst::GhostPad::new(None, gst::PadDirection::Src);
-    // // src_pad.set_target(decodebin.child_by_name("decodebin").unwrap().dynamic_cast::<Element>().unwrap().src_pads().last())?;
-
-    // let decodebin = bin.child_by_name("decodebin").unwrap().dynamic_cast::<Element>().unwrap();
-
-    // for pad in bin.pads() {
-    //     println!("{}", pad.name());
-    // }
-
-    // let mut src_pad = gst::Pad::new(Some("src"), gst::PadDirection::Src);
-    // // gst::Pad::new(Some("src"), gst::PadDirect60on::Src);
-    // src_pad.set_active(true)?;
-
-    // decodebin.add_pad(&src_pad)?;
-
-    
+    let decodebin_weak = decodebin.downgrade();
 
 
+    src.connect_pad_added(move |src, src_pad| {
+        let decodebin = match decodebin_weak.upgrade() {
+            Some(decodebin) => decodebin,
+            None => return,
+        };
+        src.link(&decodebin);
 
+    });
 
-    // let src = gst::ElementFactory::make("rtspsrc", None).map_err(|_| MissingElement("rtspsrc"))?;
-    // let decodebin =
-    //     gst::ElementFactory::make("decodebin", None).map_err(|_| MissingElement("decodebin"))?;
-
-    // // Tell the filesrc what file to load
-    // src.set_property("location", uri);
-    // let mut src_pad = gst::Pad::new(Some("src"), gst::PadDirection::Src);
-    // // gst::Pad::new(Some("src"), gst::PadDirect60on::Src);
-    // src_pad.set_active(true)?;
-
-    // src.add_pad(&src_pad)?;
-    // // src.link_pads(Some("src"), &decodebin, Some("sink"))?;
-
-    // for pad in decodebin.iterate_pads() {
-    //     println!("{}", pad?.name());
-    // }
-
-    // src.link(&decodebin)?;
-
-    // pipeline.add_many(&[&src, &decodebin])?;
-
+    pipeline.add_many(&[&src, &decodebin])?;
+    gst::Element::link_many(&[&src, &decodebin])?;
 
     // Need to move a new reference into the closure.
     // !!ATTENTION!!:
@@ -241,9 +175,6 @@ fn example_main() -> Result<Pipeline, Error> {
             } else if is_video {
                 // decodebin found a raw videostream, so we build the follow-up pipeline to
                 // display it using the autovideosink.
-
-                
-
                 let queue = gst::ElementFactory::make("queue", None)
                     .map_err(|_| MissingElement("queue"))?;
                 let convert = gst::ElementFactory::make("videoconvert", None)
@@ -278,8 +209,21 @@ fn example_main() -> Result<Pipeline, Error> {
         // What we send here is unpacked down below, in the iteration-code over sent bus-messages.
         // Because we are using the failure crate for error details here, we even get a backtrace for
         // where the error was constructed. (If RUST_BACKTRACE=1 is set)
-        println!("{} {}", is_audio, is_video);
         if let Err(err) = insert_sink(is_audio, is_video) {
+            // The following sends a message of type Error on the bus, containing our detailed
+            // error information.
+            #[cfg(feature = "v1_10")]
+            element_error!(
+                dbin,
+                gst::LibraryError::Failed,
+                ("Failed to insert sink"),
+                details: gst::Structure::builder("error-details")
+                            .field("error",
+                                   &ErrorValue(Arc::new(Mutex::new(Some(err)))))
+                            .build()
+            );
+
+            #[cfg(not(feature = "v1_10"))]
             element_error!(
                 dbin,
                 gst::LibraryError::Failed,
@@ -306,6 +250,38 @@ fn example_main() -> Result<Pipeline, Error> {
             MessageView::Eos(..) => break,
             MessageView::Error(err) => {
                 pipeline.set_state(gst::State::Null)?;
+
+                #[cfg(feature = "v1_10")]
+                {
+                    match err.details() {
+                        // This bus-message of type error contained our custom error-details struct
+                        // that we sent in the pad-added callback above. So we unpack it and log
+                        // the detailed error information here. details contains a glib::SendValue.
+                        // The unpacked error is the converted to a Result::Err, stopping the
+                        // application's execution.
+                        Some(details) if details.name() == "error-details" => details
+                            .get::<&ErrorValue>("error")
+                            .unwrap()
+                            .clone()
+                            .0
+                            .lock()
+                            .unwrap()
+                            .take()
+                            .map(Result::Err)
+                            .expect("error-details message without actual error"),
+                        _ => Err(ErrorMessage {
+                            src: msg
+                                .src()
+                                .map(|s| String::from(s.path_string()))
+                                .unwrap_or_else(|| String::from("None")),
+                            error: err.error().to_string(),
+                            debug: err.debug(),
+                            source: err.error(),
+                        }
+                        .into()),
+                    }?;
+                }
+                #[cfg(not(feature = "v1_10"))]
                 {
                     return Err(ErrorMessage {
                         src: msg
@@ -334,18 +310,14 @@ fn example_main() -> Result<Pipeline, Error> {
 
     pipeline.set_state(gst::State::Null)?;
 
-    Ok(pipeline)
+    Ok(())
 }
 
 fn main() {
     // tutorials_common::run is only required to set up the application environment on macOS
     // (but not necessary in normal Cocoa applications where this is set up automatically)
-    let pipeline = match example_main() {
-        Err(e) => {eprintln!("Error! {}", e); return},
+    match example_main() {
         Ok(r) => r,
-    };
-    pipeline.set_state(gst::State::Playing).unwrap();
-    loop {
-
+        Err(e) => eprintln!("Error! {}", e),
     }
 }
