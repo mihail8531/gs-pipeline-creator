@@ -20,14 +20,14 @@ fn pipeline_create(uri: &str) -> Result<gst::Pipeline, glib::error::Error> {
 fn main() {
     gst::init();
    
-    let pipeline = pipeline_create("rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mp4");
+    let pipeline = pipeline_create("rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mp4").unwrap();
 
-    /*
-    pipeline.set_state(gst::State::Playing); 
+    
+    pipeline.set_state(gst::State::Playing).unwrap(); 
     loop {
 
     }
-    */
+    
 
 }
 
@@ -64,8 +64,12 @@ fn main() {
 // Especially Windows APIs tend to be quite picky about samplerate and sample-format.
 // The same applies to videostreams.
 
+use gst::Element;
+use gst::Pipeline;
 use gst::element_error;
 use gst::element_warning;
+use gst::ffi::GstPad;
+use gst::ffi::gst_pad_link;
 use gst::prelude::*;
 
 use std::env;
@@ -93,7 +97,7 @@ struct ErrorMessage {
 #[boxed_type(name = "ErrorValue")]
 struct ErrorValue(Arc<Mutex<Option<Error>>>);
 
-fn example_main() -> Result<(), Error> {
+fn example_main() -> Result<Pipeline, Error> {
     gst::init()?;
 
     let args: Vec<_> = env::args().collect();
@@ -105,15 +109,55 @@ fn example_main() -> Result<(), Error> {
     };
 
     let pipeline = gst::Pipeline::new(None);
-    let src = gst::ElementFactory::make("filesrc", None).map_err(|_| MissingElement("filesrc"))?;
-    let decodebin =
-        gst::ElementFactory::make("decodebin", None).map_err(|_| MissingElement("decodebin"))?;
+    
+    // let bin = gst::parse_bin_from_description(&format!("rtspsrc location={uri} ! decodebin name=decodebin"), false)?;
+    let decodebin = gst::parse_launch(&format!("rtspsrc location={uri} latency=0 ! decodebin name=decoder"))?;
 
-    // Tell the filesrc what file to load
-    src.set_property("location", uri);
+    pipeline.add(&decodebin)?;
 
-    pipeline.add_many(&[&src, &decodebin])?;
-    gst::Element::link_many(&[&src, &decodebin])?;
+    // pipeline.add(&bin)?;
+
+    // // let src_pad = gst::GhostPad::new(None, gst::PadDirection::Src);
+    // // src_pad.set_target(decodebin.child_by_name("decodebin").unwrap().dynamic_cast::<Element>().unwrap().src_pads().last())?;
+
+    // let decodebin = bin.child_by_name("decodebin").unwrap().dynamic_cast::<Element>().unwrap();
+
+    // for pad in bin.pads() {
+    //     println!("{}", pad.name());
+    // }
+
+    // let mut src_pad = gst::Pad::new(Some("src"), gst::PadDirection::Src);
+    // // gst::Pad::new(Some("src"), gst::PadDirect60on::Src);
+    // src_pad.set_active(true)?;
+
+    // decodebin.add_pad(&src_pad)?;
+
+    
+
+
+
+
+    // let src = gst::ElementFactory::make("rtspsrc", None).map_err(|_| MissingElement("rtspsrc"))?;
+    // let decodebin =
+    //     gst::ElementFactory::make("decodebin", None).map_err(|_| MissingElement("decodebin"))?;
+
+    // // Tell the filesrc what file to load
+    // src.set_property("location", uri);
+    // let mut src_pad = gst::Pad::new(Some("src"), gst::PadDirection::Src);
+    // // gst::Pad::new(Some("src"), gst::PadDirect60on::Src);
+    // src_pad.set_active(true)?;
+
+    // src.add_pad(&src_pad)?;
+    // // src.link_pads(Some("src"), &decodebin, Some("sink"))?;
+
+    // for pad in decodebin.iterate_pads() {
+    //     println!("{}", pad?.name());
+    // }
+
+    // src.link(&decodebin)?;
+
+    // pipeline.add_many(&[&src, &decodebin])?;
+
 
     // Need to move a new reference into the closure.
     // !!ATTENTION!!:
@@ -197,6 +241,9 @@ fn example_main() -> Result<(), Error> {
             } else if is_video {
                 // decodebin found a raw videostream, so we build the follow-up pipeline to
                 // display it using the autovideosink.
+
+                
+
                 let queue = gst::ElementFactory::make("queue", None)
                     .map_err(|_| MissingElement("queue"))?;
                 let convert = gst::ElementFactory::make("videoconvert", None)
@@ -231,6 +278,7 @@ fn example_main() -> Result<(), Error> {
         // What we send here is unpacked down below, in the iteration-code over sent bus-messages.
         // Because we are using the failure crate for error details here, we even get a backtrace for
         // where the error was constructed. (If RUST_BACKTRACE=1 is set)
+        println!("{} {}", is_audio, is_video);
         if let Err(err) = insert_sink(is_audio, is_video) {
             element_error!(
                 dbin,
@@ -286,11 +334,18 @@ fn example_main() -> Result<(), Error> {
 
     pipeline.set_state(gst::State::Null)?;
 
-    Ok(())
+    Ok(pipeline)
 }
 
 fn main() {
     // tutorials_common::run is only required to set up the application environment on macOS
     // (but not necessary in normal Cocoa applications where this is set up automatically)
-    example_main();
+    let pipeline = match example_main() {
+        Err(e) => {eprintln!("Error! {}", e); return},
+        Ok(r) => r,
+    };
+    pipeline.set_state(gst::State::Playing).unwrap();
+    loop {
+
+    }
 }
