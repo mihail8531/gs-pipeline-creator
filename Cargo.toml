@@ -9,4 +9,5 @@ anyhow = "1.0"
 derive_more = "0.99.5"
 glib = { package = "glib", version = "0.15.12"}
 futures = "0.3"
-gst_app = { package = "gstreamer-app", version = "0.18.7"}
+gst_app = { package = "gstreamer-app", version = "0.18.7", features = ["v1_10"] }
+
