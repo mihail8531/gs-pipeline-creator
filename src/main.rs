@@ -20,7 +20,7 @@ struct ErrorMessage {
 
 mod rtsp_dyn_pline;
 
-use rtsp_dyn_pline::get_pipeline;
+use rtsp_dyn_pline::RTSPPipeline;
 use futures::executor::block_on;
 
 fn main() {
@@ -34,10 +34,11 @@ fn main() {
 
     gst::init();
 
-    let pipeline = match block_on(get_pipeline(uri)) {
+    let rtsppipeline = match RTSPPipeline::new(uri) {
         Ok(r) => r,
         Err(e) => {eprintln!("Error! {}", e); return},
     };
+    let pipeline = rtsppipeline.pipeline;
     pipeline.set_state(gst::State::Playing);
 
     let bus = pipeline
