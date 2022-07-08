@@ -32,6 +32,7 @@ fn main() {
         std::process::exit(-1)
     };
 
+    gst::init();
 
     let pipeline = match block_on(get_pipeline(uri)) {
         Ok(r) => r,

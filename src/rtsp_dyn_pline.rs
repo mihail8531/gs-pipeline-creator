@@ -14,9 +14,6 @@ struct MissingElement(#[error(not(source))] &'static str);
 
 
 pub async fn get_pipeline(uri: &str) -> Result<Pipeline, Error> {
-    gst::init()?;
-
-
     let pipeline = gst::Pipeline::new(None);
     let uridecodebin = gst::ElementFactory::make("uridecodebin", None).map_err(|_| MissingElement("uridecodebin"))?;
 
@@ -42,7 +39,7 @@ pub async fn get_pipeline(uri: &str) -> Result<Pipeline, Error> {
             let media_type = src_pad.current_caps().and_then(|caps| {
                 caps.structure(0).map(|s| {
                     let name = s.name();
-                    (name.starts_with("audio/"), name.starts_with("video/"))
+                    (name.starts_with("audio/x-raw"), name.starts_with("video/x-raw"))
                 })
             });
 
@@ -60,25 +57,15 @@ pub async fn get_pipeline(uri: &str) -> Result<Pipeline, Error> {
             }
         };
 
-        let insert_sink = |is_audio, is_video| -> Result<(), Error> {
-            if is_audio {
-                let appsink = gst::ElementFactory::make("appsink", None)
-                    .map_err(|_| MissingElement("appsink"))?; 
-                pipeline.add(&appsink)?;
-                uridecodebin.link(&appsink)?;
-
-                
-            } else if is_video {
-                let appsink = gst::ElementFactory::make("appsink", None)
-                    .map_err(|_| MissingElement("appsink"))?; 
-                pipeline.add(&appsink)?;
-                uridecodebin.link(&appsink)?;
-            }
-
+        let insert_sink = || -> Result<(), Error> {
+            let appsink = gst::ElementFactory::make("appsink", None)
+                .map_err(|_| MissingElement("appsink"))?; 
+            pipeline.add(&appsink)?;
+            uridecodebin.link(&appsink)?;
             Ok(())
         };
 
-        if let Err(err) = insert_sink(is_audio, is_video) {
+        if let Err(err) = insert_sink() {
             #[cfg(not(feature = "v1_10"))]
             element_error!(
                 dbin,
