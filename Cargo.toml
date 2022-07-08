@@ -1,0 +1,11 @@
+[package]
+name = "gs-pipeline-creator"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+gst = { package = "gstreamer", version = "0.18.8" }
+anyhow = "1.0"
+derive_more = "0.99.5"
+glib = { package = "glib", version = "0.15.12"}
+futures = "0.3"
